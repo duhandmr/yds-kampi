@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --color-brand-50: #f6f3ff;
+  --color-brand-100: #ede8ff;
+  --color-brand-200: #ddd3ff;
+  --color-brand-300: #c4b2fe;
+  --color-brand-400: #a687fb;
+  --color-brand-500: #8b5cf6;
+  --color-brand-600: #7440e8;
+  --color-brand-700: #6330c9;
+  --color-brand-800: #5228a3;
+  --color-brand-900: #432485;
+  --color-blush-50: #fdf2f8;
+  --color-blush-100: #fce7f3;
+  --color-blush-200: #fbcfe8;
+  --color-blush-600: #c0266d;
+  --color-blush-700: #9d1d59;
+}
+
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-gradient-to-b from-brand-50 via-white to-blush-50 text-zinc-900 antialiased;
+  min-height: 100dvh;
+}
+
+.dark body {
+  @apply from-zinc-950 via-zinc-950 to-[#1a1326] text-zinc-100;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-brand-500);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+dialog::backdrop {
+  background: rgb(24 16 40 / 0.55);
+  backdrop-filter: blur(2px);
+}
+
+details > summary {
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.sr-only-focusable:not(:focus):not(:focus-within) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

@@ -1,0 +1,444 @@
+// Yaren'in YDS Kampı - veri modeli
+// PostgreSQL + Prisma. Performans kayıtları soft delete (deletedAt) ile korunur;
+// kullanıcıya bağlı performans tablolarında ilişkiler "Restrict" olduğu için
+// kullanıcı kaydı yanlışlıkla fiziksel olarak silinemez.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum QuestionType {
+  VOCABULARY
+  GRAMMAR
+  SENTENCE_COMPLETION
+  TRANSLATION_EN_TR
+  TRANSLATION_TR_EN
+  READING
+  COHERENCE
+  DIALOGUE
+  PARAPHRASE
+  MISSING_SENTENCE
+  IRRELEVANT_SENTENCE
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum QualityStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  DISABLED
+}
+
+enum QuestionSource {
+  SEED
+  ADMIN
+  AI
+}
+
+enum ExamKind {
+  PLACEMENT
+  QUICK
+  DAILY
+  INTENSIVE
+  FULL
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum VocabStatus {
+  NEW
+  LEARNING
+  REVIEW
+  LEARNED
+}
+
+enum AiTask {
+  QUESTION_GENERATION
+  QUESTION_VERIFICATION
+  EXPLANATION
+  PERFORMANCE_REVIEW
+  DISTRIBUTION
+  VOCABULARY
+}
+
+enum AiLogStatus {
+  SUCCESS
+  PARTIAL
+  INVALID_OUTPUT
+  PROVIDER_ERROR
+  DISABLED
+}
+
+model User {
+  id           String    @id @default(cuid())
+  username     String    @unique
+  passwordHash String
+  role         Role      @default(USER)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  profile           Profile?
+  sessions          Session[]
+  exams             Exam[]
+  attempts          ExamAttempt[]
+  topicPerformances TopicPerformance[]
+  vocabularyItems   VocabularyItem[]
+  vocabularyReviews VocabularyReview[]
+  recommendations   DailyRecommendation[]
+  streak            StudyStreak?
+  exposures         QuestionExposure[]
+  aiLogs            AiGenerationLog[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Profile {
+  id                      String    @id @default(cuid())
+  userId                  String    @unique
+  displayName             String    @default("Yaren")
+  onboardingCompletedAt   DateTime?
+  placementCompletedAt    DateTime?
+  estimatedLevel          String?
+  recommendedDailyMinutes Int?
+  startingPlan            Json?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Tek satırlık kamp ayarları (id = "default")
+model CampSettings {
+  id                      String    @id @default("default")
+  campStartDate           String
+  examDate                String?
+  dailyQuestionCount      Int       @default(20)
+  dailyDurationMinutes    Int       @default(35)
+  quickQuestionCount      Int       @default(10)
+  quickDurationMinutes    Int       @default(18)
+  intensiveQuestionCount  Int       @default(40)
+  intensiveDurationMinutes Int      @default(70)
+  fullMockEnabled         Boolean   @default(false)
+  fullMockQuestionCount   Int       @default(80)
+  fullMockDurationMinutes Int       @default(180)
+  placementQuestionCount  Int       @default(22)
+  placementDurationMinutes Int      @default(30)
+  topicWeights            Json
+  aiEnabled               Boolean   @default(false)
+  aiAutoPublish           Boolean   @default(false)
+  updatedAt               DateTime  @updatedAt
+}
+
+model Topic {
+  id           String       @id @default(cuid())
+  slug         String       @unique
+  name         String
+  questionType QuestionType
+  description  String
+  lesson       Json
+  sortOrder    Int          @default(0)
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  questions    Question[]
+  performances TopicPerformance[]
+
+  @@index([questionType])
+}
+
+model Question {
+  id            String         @id @default(cuid())
+  type          QuestionType
+  topicId       String
+  subtopic      String
+  difficulty    Difficulty
+  passage       String?        @db.Text
+  stem          String         @db.Text
+  correctLabel  String         @db.VarChar(1)
+  explanation   String         @db.Text
+  strategy      String         @db.Text
+  tip           String         @db.Text
+  keywords      Json
+  contentHash   String         @unique
+  qualityStatus QualityStatus  @default(PENDING_REVIEW)
+  qualityReport Json?
+  source        QuestionSource @default(ADMIN)
+  aiLogId       String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  deletedAt     DateTime?
+
+  topic         Topic              @relation(fields: [topicId], references: [id], onDelete: Restrict)
+  options       QuestionOption[]
+  examQuestions ExamQuestion[]
+  answers       UserAnswer[]
+  exposures     QuestionExposure[]
+  aiLog         AiGenerationLog?   @relation(fields: [aiLogId], references: [id], onDelete: SetNull)
+
+  @@index([qualityStatus, type])
+  @@index([topicId, difficulty])
+  @@index([createdAt])
+}
+
+model QuestionOption {
+  id         String  @id @default(cuid())
+  questionId String
+  label      String  @db.VarChar(1)
+  text       String  @db.Text
+  isCorrect  Boolean @default(false)
+  rationale  String  @db.Text
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, label])
+}
+
+// Yaren'in bir soruyu daha önce görüp görmediğini tutar
+model QuestionExposure {
+  id          String   @id @default(cuid())
+  userId      String
+  questionId  String
+  timesSeen   Int      @default(0)
+  lastSeenAt  DateTime
+  lastCorrect Boolean?
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, questionId])
+  @@index([userId, lastSeenAt])
+}
+
+model Exam {
+  id              String   @id @default(cuid())
+  userId          String
+  kind            ExamKind
+  title           String
+  studyDate       String
+  questionCount   Int
+  durationSeconds Int
+  topicPlan       Json
+  createdAt       DateTime @default(now())
+  deletedAt       DateTime?
+
+  user      User           @relation(fields: [userId], references: [id], onDelete: Restrict)
+  questions ExamQuestion[]
+  attempt   ExamAttempt?
+
+  @@unique([userId, studyDate, kind])
+  @@index([userId, createdAt])
+}
+
+model ExamQuestion {
+  id         String @id @default(cuid())
+  examId     String
+  questionId String
+  position   Int
+
+  exam     Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@unique([examId, position])
+  @@unique([examId, questionId])
+}
+
+model ExamAttempt {
+  id              String        @id @default(cuid())
+  examId          String        @unique
+  userId          String
+  status          AttemptStatus @default(IN_PROGRESS)
+  startedAt       DateTime      @default(now())
+  deadlineAt      DateTime
+  completedAt     DateTime?
+  autoSubmitted   Boolean       @default(false)
+  correctCount    Int?
+  wrongCount      Int?
+  blankCount      Int?
+  scorePercent    Float?
+  durationSeconds Int?
+  summary         Json?
+  deletedAt       DateTime?
+
+  exam           Exam                 @relation(fields: [examId], references: [id], onDelete: Restrict)
+  user           User                 @relation(fields: [userId], references: [id], onDelete: Restrict)
+  answers        UserAnswer[]
+  recommendation DailyRecommendation?
+
+  @@index([userId, status])
+  @@index([userId, completedAt])
+}
+
+model UserAnswer {
+  id               String    @id @default(cuid())
+  attemptId        String
+  questionId       String
+  selectedLabel    String?   @db.VarChar(1)
+  isFlagged        Boolean   @default(false)
+  isCorrect        Boolean?
+  timeSpentSeconds Int       @default(0)
+  answeredAt       DateTime?
+  updatedAt        DateTime  @updatedAt
+
+  attempt  ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  question Question    @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@unique([attemptId, questionId])
+}
+
+model TopicPerformance {
+  id             String    @id @default(cuid())
+  userId         String
+  topicId        String
+  questionsSeen  Int       @default(0)
+  correct        Int       @default(0)
+  wrong          Int       @default(0)
+  blank          Int       @default(0)
+  recentAccuracy Float     @default(0)
+  masteryScore   Float     @default(0.5)
+  lastPracticedAt DateTime?
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, topicId])
+  @@index([userId, masteryScore])
+}
+
+model VocabularyItem {
+  id               String      @id @default(cuid())
+  userId           String
+  term             String
+  meaningTr        String
+  partOfSpeech     String
+  exampleEn        String?     @db.Text
+  exampleTr        String?     @db.Text
+  synonyms         String[]
+  antonyms         String[]
+  status           VocabStatus @default(NEW)
+  easeFactor       Float       @default(2.5)
+  intervalDays     Int         @default(0)
+  repetitions      Int         @default(0)
+  dueAt            DateTime    @default(now())
+  lastSeenAt       DateTime?
+  sourceQuestionId String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  deletedAt        DateTime?
+
+  user    User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  reviews VocabularyReview[]
+
+  @@unique([userId, term])
+  @@index([userId, dueAt])
+  @@index([userId, status])
+}
+
+model VocabularyReview {
+  id               String   @id @default(cuid())
+  vocabularyItemId String
+  userId           String
+  grade            Int
+  previousInterval Int
+  newInterval      Int
+  reviewedAt       DateTime @default(now())
+
+  vocabularyItem VocabularyItem @relation(fields: [vocabularyItemId], references: [id], onDelete: Restrict)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, reviewedAt])
+}
+
+model DailyRecommendation {
+  id                 String    @id @default(cuid())
+  userId             String
+  attemptId          String    @unique
+  studyDate          String
+  message            String    @db.Text
+  focusTopics        Json
+  reviewList         Json
+  vocabularyToReview Json
+  extraQuestionCount Int
+  nextGoal           String    @db.Text
+  aiEnhanced         Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  deletedAt          DateTime?
+
+  user    User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  attempt ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+
+  @@index([userId, studyDate])
+}
+
+model StudyStreak {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  currentStreak  Int      @default(0)
+  longestStreak  Int      @default(0)
+  lastStudyDate  String?
+  totalStudyDays Int      @default(0)
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+}
+
+model AiGenerationLog {
+  id             String      @id @default(cuid())
+  task           AiTask
+  provider       String
+  model          String
+  status         AiLogStatus
+  requestSummary String      @db.Text
+  rawResponse    String?     @db.Text
+  errorMessage   String?     @db.Text
+  itemsAccepted  Int         @default(0)
+  itemsRejected  Int         @default(0)
+  rejectionNotes Json?
+  createdById    String?
+  createdAt      DateTime    @default(now())
+
+  createdBy User?      @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  questions Question[]
+
+  @@index([task, createdAt])
+}
+
+// Sunucusuz ortamda da çalışan, veritabanı tabanlı hız sınırlama
+model RateLimit {
+  key         String   @id
+  count       Int
+  windowStart DateTime
+}
